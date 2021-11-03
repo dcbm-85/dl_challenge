@@ -4,8 +4,12 @@ Predictor interfaces for the Deep Learning challenge.
 
 from typing import List
 import numpy as np
+import torch
+from torchvision import transforms
+import torch.nn.functional as F
 
-
+from deep_equation.model import DigitsModel, CalculatorModel
+from deep_equation.utils import map_label
 class BaseNet:
     """
     Base class that must be used as base interface to implement 
@@ -70,24 +74,21 @@ class RandomModel(BaseNet):
         
         return predictions
 
-
 class StudentModel(BaseNet):
     """
-    TODO: THIS is the class you have to implement:
         load_model: method that loads your best model.
         predict: method that makes batch predictions.
     """
-
-    # TODO
-    def load_model(self, model_path: str):
+    
+    def load_model(self, model_path: str, device = 'cpu'):
         """
         Load the student's trained model.
-        TODO: update the default `model_path` 
-              to be the correct path for your best model!
         """
-        pass
+        model_digits = DigitsModel()
+        model_calc = CalculatorModel(model_digits)
+        model_calc.load_state_dict(torch.load(model_path, map_location=device))
+        return model_calc
     
-    # TODO:
     def predict(
         self, images_a, images_b,
         operators, device = 'cpu'
@@ -95,6 +96,39 @@ class StudentModel(BaseNet):
         """Implement this method to perform predictions 
         given a list of images_a, images_b and operators.
         """
+        T = transforms.Compose([
+            transforms.Grayscale(),
+            transforms.Resize(28),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+
+        word_to_ix = dict(zip(['+', '-', '*', '/'],range(4)))
+        one_hot = F.one_hot(torch.arange(0, 4), 4)
+        label_to_value  = map_label()
+
+        model = self.load_model('resources/calculator_model.pt', device=device)
+        model = model.to(device)  
+        model.eval()
+
         predictions = []
+        for image_a, image_b, operator in zip(images_a, images_b, operators):            
+            
+            if operator not in ['+', '-', '*', '/']:
+                predictions.append(None)
+                continue
+
+            operator =  one_hot[word_to_ix[operator]]
+            image_a, image_b, operator = T(image_a).unsqueeze(0), \
+                T(image_b).unsqueeze(0), operator.unsqueeze(0)
+            image_a, image_b, operator = image_a.to(device), \
+                image_b.to(device), operator.to(device)
+
+            output = model(image_a, image_b, operator)
+            pred = output.argmax(dim=1, keepdim=True)
+            pred = label_to_value[pred.item()]
+            if pred == np.Inf:
+                pred = np.nan
+            predictions.append(pred)
         
         return predictions
